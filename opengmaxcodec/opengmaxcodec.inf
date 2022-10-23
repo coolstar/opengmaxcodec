@@ -1,0 +1,72 @@
+;/*++
+;
+;Copyright (c) CoolStar.  All rights reserved.
+;
+;Module Name:
+;    coolstar.inf
+;
+;Abstract:
+;    INF file for installing the Open Gmax Codec Driver 
+;
+;
+;--*/
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Media
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = CoolStar
+DriverVer   = 2/23/2022,1.0.0
+CatalogFile = opengmaxcodec.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+; ================= Class section =====================
+
+[SourceDisksNames]
+1 = %DiskId1%,,,""
+
+[SourceDisksFiles]
+opengmaxcodec.sys  = 1,,
+
+;*****************************************
+; opengmaxcodec  Install Section
+;*****************************************
+
+[Manufacturer]
+%StdMfg%=Standard,NTAMD64
+
+; Decorated model section take precedence over undecorated 
+; ones on XP and later.
+[Standard.NTAMD64]
+%Max98927.DeviceDesc%=OpenGmaxCodec_Device, ACPI\MX98927
+%Max98373.DeviceDesc%=OpenGmaxCodec_Device, ACPI\MX98373
+
+[OpenGmaxCodec_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+opengmaxcodec.sys
+
+;-------------- Service installation
+[OpenGmaxCodec_Device.NT.Services]
+AddService = opengmaxcodec,%SPSVCINST_ASSOCSERVICE%, OpenGmaxCodec_Service_Inst
+
+; -------------- opengmaxcodec driver install sections
+[OpenGmaxCodec_Service_Inst]
+DisplayName    = %opengmaxcodec.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START 
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\opengmaxcodec.sys
+LoadOrderGroup = Base
+
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+StdMfg                 = "CoolStar"
+DiskId1                = "OpenGMaxCodec Installation Disk #1"
+Max98927.DeviceDesc = "Maxim 98927 Audio Codec"
+Max98373.DeviceDesc = "Maxim 98927 Audio Codec"
+opengmaxcodec.SVCDESC    = "OpenGMaxCodec Service"

@@ -68,5 +68,5 @@ SPSVCINST_ASSOCSERVICE= 0x00000002
 StdMfg                 = "CoolStar"
 DiskId1                = "OpenGMaxCodec Installation Disk #1"
 Max98927.DeviceDesc = "Maxim 98927 Audio Codec"
-Max98373.DeviceDesc = "Maxim 98927 Audio Codec"
+Max98373.DeviceDesc = "Maxim 98373 Audio Codec"
 opengmaxcodec.SVCDESC    = "OpenGMaxCodec Service"

@@ -1,6 +1,6 @@
 #include "opengmaxcodec.h"
 #include "max98927.h"
-//#include "max98373.h"
+#include "max98373.h"
 
 #define bool int
 
@@ -67,7 +67,6 @@ NTSTATUS gmax_reg_write(
 	uint8_t buf[3];
 	buf[0] = (reg >> 8) & 0xff;
 	buf[1] = reg & 0xff;
-	DbgPrint("Writing reg: %x\n", reg);
 	buf[2] = data;
 	return SpbWriteDataSynchronously(&pDevice->I2CContext, buf, sizeof(buf));
 }
@@ -121,11 +120,23 @@ struct initreg max98927_initregs[] = {
 	{MAX98927_R0086_ENV_TRACK_CTRL, 0x1}
 };
 
+struct initreg max98373_initregs[] = {
+	{MAX98373_R2024_PCM_DATA_FMT_CFG, 0x58},
+	{MAX98373_R2026_PCM_CLOCK_RATIO, 0x6},
+	{MAX98373_R202B_PCM_RX_EN, 0x1},
+	{MAX98373_R202C_PCM_TX_EN, 0x1},
+	{MAX98373_R203F_AMP_DSP_CFG, 0x3},
+	{MAX98373_R2046_IV_SENSE_ADC_DSP_CFG, 0xF7},
+	{MAX98373_R2047_IV_SENSE_ADC_EN, 0x3},
+	{MAX98373_R20B1_BDE_L4_CFG_1, 0x6},
+	{MAX98373_R20D4_DHT_EN, 0x1}
+};
+
 NTSTATUS toggleI2CAmp(
 	_In_ PGMAX_CONTEXT pDevice,
 	BOOLEAN enable
 ) {
-	return gmax_reg_write(pDevice, MAX98927_R003A_AMP_EN, enable & 0x1);
+	return gmax_reg_write(pDevice, pDevice->chipModel == 98927 ? MAX98927_R003A_AMP_EN : MAX98373_R2043_AMP_EN, enable & 0x1);
 }
 
 NTSTATUS enableOutput(
@@ -133,7 +144,7 @@ NTSTATUS enableOutput(
 	BOOLEAN enable
 ) {
 	NTSTATUS status;
-	status = gmax_reg_write(pDevice, MAX98927_R00FF_GLOBAL_SHDN, 1);
+	status = gmax_reg_write(pDevice, pDevice->chipModel == 98927 ? MAX98927_R00FF_GLOBAL_SHDN : MAX98373_R20FF_GLOBAL_SHDN, 1);
 	if (!NT_SUCCESS(status)) {
 		return status;
 	}
@@ -142,6 +153,90 @@ NTSTATUS enableOutput(
 	Interval.QuadPart = -20;
 	KeDelayExecutionThread(KernelMode, FALSE, &Interval);
 	return toggleI2CAmp(pDevice, enable);
+}
+
+NTSTATUS
+GetDeviceHID(
+	_In_ WDFDEVICE FxDevice
+)
+{
+	NTSTATUS status = STATUS_ACPI_NOT_INITIALIZED;
+	ACPI_EVAL_INPUT_BUFFER_EX inputBuffer;
+	RtlZeroMemory(&inputBuffer, sizeof(inputBuffer));
+
+	inputBuffer.Signature = ACPI_EVAL_INPUT_BUFFER_SIGNATURE_EX;
+	status = RtlStringCchPrintfA(
+		inputBuffer.MethodName,
+		sizeof(inputBuffer.MethodName),
+		"_HID"
+	);
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	WDFMEMORY outputMemory;
+	PACPI_EVAL_OUTPUT_BUFFER outputBuffer;
+	size_t outputArgumentBufferSize = 32;
+	size_t outputBufferSize = FIELD_OFFSET(ACPI_EVAL_OUTPUT_BUFFER, Argument) + outputArgumentBufferSize;
+
+	WDF_OBJECT_ATTRIBUTES attributes;
+	WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+	attributes.ParentObject = FxDevice;
+
+	status = WdfMemoryCreate(&attributes,
+		NonPagedPoolNx,
+		0,
+		outputBufferSize,
+		&outputMemory,
+		(PVOID*)&outputBuffer);
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	RtlZeroMemory(outputBuffer, outputBufferSize);
+
+	WDF_MEMORY_DESCRIPTOR inputMemDesc;
+	WDF_MEMORY_DESCRIPTOR outputMemDesc;
+	WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(&inputMemDesc, &inputBuffer, (ULONG)sizeof(inputBuffer));
+	WDF_MEMORY_DESCRIPTOR_INIT_HANDLE(&outputMemDesc, outputMemory, NULL);
+
+	status = WdfIoTargetSendInternalIoctlSynchronously(
+		WdfDeviceGetIoTarget(FxDevice),
+		NULL,
+		IOCTL_ACPI_EVAL_METHOD_EX,
+		&inputMemDesc,
+		&outputMemDesc,
+		NULL,
+		NULL
+	);
+	if (!NT_SUCCESS(status)) {
+		goto Exit;
+	}
+
+	if (outputBuffer->Signature != ACPI_EVAL_OUTPUT_BUFFER_SIGNATURE) {
+		goto Exit;
+	}
+
+	if (outputBuffer->Count < 1) {
+		goto Exit;
+	}
+
+	PGMAX_CONTEXT pDevice = GetDeviceContext(FxDevice);
+	if (strncmp(outputBuffer->Argument[0].Data, "MX98373", outputBuffer->Argument[0].DataLength) == 0) {
+		pDevice->chipModel = 98373;
+	}
+	else if (strncmp(outputBuffer->Argument[0].Data, "MX98927", outputBuffer->Argument[0].DataLength) == 0) {
+		pDevice->chipModel = 98927;
+	}
+	else {
+		status = STATUS_ACPI_INVALID_ARGUMENT;
+	}
+
+Exit:
+	if (outputMemory != WDF_NO_HANDLE) {
+		WdfObjectDelete(outputMemory);
+	}
+	return status;
 }
 
 NTSTATUS
@@ -247,7 +342,7 @@ UpdateIntcSSTStatus(
 
 	if (pDevice->IntcSSTHwMultiCodecCallback) {
 		if (sstStatus != 1 || pDevice->IntcSSTStatus) {
-			SSTArg->chipModel = 98927;
+			SSTArg->chipModel = pDevice->chipModel;
 			SSTArg->caller = 0xc0000165; //gmaxcodec
 			if (sstStatus) {
 				if (sstStatus == 1) {
@@ -319,7 +414,7 @@ IntcSSTCallbackFunction(
 	//Intel Caller: 0xc00000a3 (STATUS_DEVICE_NOT_READY)
 	//GMax Caller: 0xc0000165
 
-	if (SSTArgs->chipModel == 98927) {
+	if (SSTArgs->chipModel == pDevice->chipModel) {
 		/*
 
 		Gmax (no SST driver):
@@ -526,17 +621,14 @@ StartCodec(
 ) {
 	NTSTATUS status = STATUS_SUCCESS;
 	if (!pDevice->SetUID) {
-		DbgPrint("UID not set! Not starting...\n");
 		status = STATUS_INVALID_DEVICE_STATE;
 		return status;
 	}
 
 	UINT8 data = 0;
-	gmax_reg_read(pDevice, MAX98927_R01FF_REV_ID, &data);
+	gmax_reg_read(pDevice, pDevice->chipModel == 98927 ? MAX98927_R01FF_REV_ID : MAX98373_R21FF_REV_ID, &data);
 
-	DbgPrint("Rev ID: 0x%x\n", data);
-
-	{ //max98927
+	if (pDevice->chipModel == 98927) { //max98927
 		for (int i = 0; i < sizeof(max98927_initregs) / sizeof(struct initreg); i++) {
 			struct initreg regval = max98927_initregs[i];
 			status = gmax_reg_write(pDevice, regval.reg, regval.val);
@@ -614,19 +706,101 @@ StartCodec(
 			return status;
 		}
 	}
+	else { //98373
+		for (int i = 0; i < sizeof(max98373_initregs) / sizeof(struct initreg); i++) {
+			struct initreg regval = max98373_initregs[i];
+			status = gmax_reg_write(pDevice, regval.reg, regval.val);
+			if (!NT_SUCCESS(status)) {
+				return status;
+			}
+		}
+
+		UINT16 digitalVolume = 12;
+		UINT16 digitalGain = 0;
+		UINT16 digitalMaxGain = 0;
+
+		status = gmax_reg_write(pDevice, MAX98373_R203D_AMP_DIG_VOL_CTRL, digitalVolume & 0x7F);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R203E_AMP_PATH_GAIN, ((digitalGain & 0xF) << 4) | (digitalMaxGain & 0xF));
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		UINT16 interleave_mode = 0; //was 1
+		UINT16 vmon_slot_no = 4;
+		UINT16 imon_slot_no = 5;
+		if (pDevice->UID == 1) {
+			vmon_slot_no = 6;
+			imon_slot_no = 7;
+		}
+
+		UINT16 spkfb_slot_no = 2;
+
+		UINT16 temp = ~((1 << vmon_slot_no) | (1 << imon_slot_no));
+		status = gmax_reg_write(pDevice, MAX98373_R2020_PCM_TX_HIZ_EN_1, temp);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2021_PCM_TX_HIZ_EN_2, (temp >> 8) | 0xff00);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2030_ICC_TX_HIZ_EN_1, temp);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2031_ICC_TX_HIZ_EN_2, (temp >> 8) | 0xff00);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2022_PCM_TX_SRC_1, ((imon_slot_no & 0xF) << 4) | (vmon_slot_no & 0xF));
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2023_PCM_TX_SRC_2, spkfb_slot_no);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2024_PCM_DATA_FMT_CFG, interleave_mode != 0 ? 0x5C : 0);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2028_PCM_SR_SETUP_2, interleave_mode != 0 ? 0x85 : 0x88);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2029_PCM_TO_SPK_MONO_MIX_1, pDevice->UID == 0 ? 0x40 : 0);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R202A_PCM_TO_SPK_MONO_MIX_2, 1);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+	}
 
 	status = enableOutput(pDevice, TRUE);
 
-	DbgPrint("Successfully enabled 0x%x\n", status);
-
-	uint16_t regs[] = {0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007,0x0008,0x0009,0x000A,0x000B,0x000C,0x000D,0x000E,0x000F,0x0010,0x0011,0x0012,0x0013,0x0014,0x0015,0x0016,0x0017,0x0018,0x0019,0x001A,0x001B,0x001C,0x001D,0x001E,0x001F,0x0020,0x0021,0x0022,0x0023,0x0024,0x0025,0x0026,0x0027,0x0028,0x002B,0x002C,0x002E,0x002F,0x0030,0x0031,0x0032,0x0033,0x0034,0x0035,0x0036,0x0037,0x0038,0x0039,0x003A,0x003B,0x003C,0x003D,0x003E,0x003F,0x0040,0x0041,0x0042,0x0043,0x0044,0x0045,0x0046,0x0047,0x0048,0x0049,0x004A,0x004B,0x004C,0x004D,0x004E,0x0051,0x0052,0x0053,0x0054,0x0055,0x005A,0x005B,0x005C,0x005D,0x005E,0x005F,0x0060,0x0061,0x0072,0x0073,0x0074,0x0075,0x0076,0x0077,0x0078,0x0079,0x007A,0x007B,0x007C,0x007D,0x007E,0x007F,0x0080,0x0081,0x0082,0x0083,0x0084,0x0085,0x0086,0x0087,0x00FF,0x0100,0x01FF};
+	/*uint16_t regs[] = {0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007,0x0008,0x0009,0x000A,0x000B,0x000C,0x000D,0x000E,0x000F,0x0010,0x0011,0x0012,0x0013,0x0014,0x0015,0x0016,0x0017,0x0018,0x0019,0x001A,0x001B,0x001C,0x001D,0x001E,0x001F,0x0020,0x0021,0x0022,0x0023,0x0024,0x0025,0x0026,0x0027,0x0028,0x002B,0x002C,0x002E,0x002F,0x0030,0x0031,0x0032,0x0033,0x0034,0x0035,0x0036,0x0037,0x0038,0x0039,0x003A,0x003B,0x003C,0x003D,0x003E,0x003F,0x0040,0x0041,0x0042,0x0043,0x0044,0x0045,0x0046,0x0047,0x0048,0x0049,0x004A,0x004B,0x004C,0x004D,0x004E,0x0051,0x0052,0x0053,0x0054,0x0055,0x005A,0x005B,0x005C,0x005D,0x005E,0x005F,0x0060,0x0061,0x0072,0x0073,0x0074,0x0075,0x0076,0x0077,0x0078,0x0079,0x007A,0x007B,0x007C,0x007D,0x007E,0x007F,0x0080,0x0081,0x0082,0x0083,0x0084,0x0085,0x0086,0x0087,0x00FF,0x0100,0x01FF};
 	for (int i = 0; i < sizeof(regs) / sizeof(uint16_t); i++) {
 		UINT16 reg = regs[i];
 		UINT8 data = 0;
 		gmax_reg_read(pDevice, reg, &data);
 
 		DbgPrint("Reg 0x%04x:\n\t0x%02x", reg, data);
-	}
+	}*/
 
 	pDevice->DevicePoweredOn = TRUE;
 	return status;
@@ -638,20 +812,7 @@ StopCodec(
 ) {
 	NTSTATUS status;
 
-	/*status = toggleI2CAmp(pDevice, FALSE);
-	if (!NT_SUCCESS(status)) {
-		return status;
-	}
-
-	UINT16 shdnReg = MAX98927_R00FF_GLOBAL_SHDN;
-	status = gmax_reg_write(pDevice, shdnReg, 0);
-	if (!NT_SUCCESS(status)) {
-		return status;
-	}*/
-
-	status = gmax_reg_write(pDevice, MAX98927_R0100_SOFT_RESET, 1);
-
-	DbgPrint("Successfully disabled 0x%x\n", status);
+	status = gmax_reg_write(pDevice, pDevice->chipModel == 98927 ? MAX98927_R0100_SOFT_RESET : MAX98373_R2000_SW_RESET, 1);
 	
 	pDevice->DevicePoweredOn = FALSE;
 	return status;
@@ -661,6 +822,8 @@ VOID
 CSAudioRegisterEndpoint(
 	PGMAX_CONTEXT pDevice
 ) {
+	return;
+
 	CsAudioArg arg;
 	RtlZeroMemory(&arg, sizeof(CsAudioArg));
 	arg.argSz = sizeof(CsAudioArg);
@@ -675,6 +838,8 @@ CsAudioCallbackFunction(
 	CsAudioArg* arg,
 	PVOID Argument2
 ) {
+	return;
+
 	if (!pDevice) {
 		return;
 	}
@@ -802,6 +967,12 @@ Status
 	if (!NT_SUCCESS(status)) {
 		return status;
 	}
+
+	status = GetDeviceHID(FxDevice);
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
 	pDevice->SetUID = TRUE;
 
 	if (pDevice->UID == 0) {

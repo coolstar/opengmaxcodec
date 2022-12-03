@@ -637,8 +637,8 @@ StartCodec(
 			}
 		}
 
-		UINT16 ampVolume = 56; //was 60
-		UINT16 speakerGain = 0x5; //was 1
+		UINT16 ampVolume = 60;
+		UINT16 speakerGain = 1;
 
 		status = gmax_reg_write(pDevice, MAX98927_R0036_AMP_VOL_CTRL, ampVolume & 0x7F);
 		if (!NT_SUCCESS(status)) {

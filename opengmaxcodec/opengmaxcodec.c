@@ -838,8 +838,6 @@ CsAudioCallbackFunction(
 	CsAudioArg* arg,
 	PVOID Argument2
 ) {
-	return;
-
 	if (!pDevice) {
 		return;
 	}

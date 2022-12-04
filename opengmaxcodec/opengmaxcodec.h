@@ -28,7 +28,7 @@
 // String definitions
 //
 
-#define DRIVERNAME                 "ssm4567.sys: "
+#define DRIVERNAME                 "opengmaxcodec.sys: "
 
 #define GMAX_POOL_TAG            (ULONG) 'B343'
 
@@ -162,7 +162,7 @@ EVT_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL GmaxEvtInternalDeviceControl;
 #define DBG_PNP   2
 #define DBG_IOCTL 4
 
-#if 1
+#if 0
 #define GmaxPrint(dbglevel, dbgcatagory, fmt, ...) {          \
     if (GmaxDebugLevel >= dbglevel &&                         \
         (GmaxDebugCatagories && dbgcatagory))                 \

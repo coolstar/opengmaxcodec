@@ -729,7 +729,7 @@ StartCodec(
 			return status;
 		}
 
-		UINT16 interleave_mode = 0; //was 1
+		UINT16 interleave_mode = 1; //was 1
 		UINT16 vmon_slot_no = 4;
 		UINT16 imon_slot_no = 5;
 		if (pDevice->UID == 1) {

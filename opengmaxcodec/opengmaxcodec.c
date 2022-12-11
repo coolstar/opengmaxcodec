@@ -615,6 +615,97 @@ IntcSSTCallbackFunction(
 	}
 }
 
+static NTSTATUS GetIntegerProperty(
+	_In_ WDFDEVICE FxDevice,
+	char *propertyStr,
+	UINT16 *property
+) {
+	PGMAX_CONTEXT pDevice = GetDeviceContext(FxDevice);
+	WDFMEMORY outputMemory = WDF_NO_HANDLE;
+
+	NTSTATUS status = STATUS_ACPI_NOT_INITIALIZED;
+
+	size_t inputBufferLen = sizeof(ACPI_GET_DEVICE_SPECIFIC_DATA) + strlen(propertyStr) + 1;
+	ACPI_GET_DEVICE_SPECIFIC_DATA* inputBuffer = ExAllocatePoolWithTag(NonPagedPool, inputBufferLen, GMAX_POOL_TAG);
+	if (!inputBuffer) {
+		goto Exit;
+	}
+	RtlZeroMemory(inputBuffer, inputBufferLen);
+
+	inputBuffer->Signature = IOCTL_ACPI_GET_DEVICE_SPECIFIC_DATA_SIGNATURE;
+
+	unsigned char uuidend[] = { 0x8a, 0x91, 0xbc, 0x9b, 0xbf, 0x4a, 0xa3, 0x01 };
+
+	inputBuffer->Section.Data1 = 0xdaffd814;
+	inputBuffer->Section.Data2 = 0x6eba;
+	inputBuffer->Section.Data3 = 0x4d8c;
+	memcpy(inputBuffer->Section.Data4, uuidend, sizeof(uuidend)); //Avoid Windows defender false positive
+
+	strcpy(inputBuffer->PropertyName, propertyStr);
+	inputBuffer->PropertyNameLength = strlen(propertyStr) + 1;
+
+	PACPI_EVAL_OUTPUT_BUFFER outputBuffer;
+	size_t outputArgumentBufferSize = 8;
+	size_t outputBufferSize = FIELD_OFFSET(ACPI_EVAL_OUTPUT_BUFFER, Argument) + sizeof(ACPI_METHOD_ARGUMENT_V1) + outputArgumentBufferSize;
+
+	WDF_OBJECT_ATTRIBUTES attributes;
+	WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+	attributes.ParentObject = FxDevice;
+	status = WdfMemoryCreate(&attributes,
+		NonPagedPoolNx,
+		0,
+		outputBufferSize,
+		&outputMemory,
+		&outputBuffer);
+	if (!NT_SUCCESS(status)) {
+		goto Exit;
+	}
+
+	WDF_MEMORY_DESCRIPTOR inputMemDesc;
+	WDF_MEMORY_DESCRIPTOR outputMemDesc;
+	WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(&inputMemDesc, inputBuffer, (ULONG)inputBufferLen);
+	WDF_MEMORY_DESCRIPTOR_INIT_HANDLE(&outputMemDesc, outputMemory, NULL);
+
+	status = WdfIoTargetSendInternalIoctlSynchronously(
+		WdfDeviceGetIoTarget(FxDevice),
+		NULL,
+		IOCTL_ACPI_GET_DEVICE_SPECIFIC_DATA,
+		&inputMemDesc,
+		&outputMemDesc,
+		NULL,
+		NULL
+	);
+	if (!NT_SUCCESS(status)) {
+		GmaxPrint(
+			DEBUG_LEVEL_ERROR,
+			DBG_IOCTL,
+			"Error getting device data - 0x%x\n",
+			status);
+		goto Exit;
+	}
+
+	if (outputBuffer->Signature != ACPI_EVAL_OUTPUT_BUFFER_SIGNATURE_V1 &&
+		outputBuffer->Count < 1 &&
+		outputBuffer->Argument->Type != ACPI_METHOD_ARGUMENT_INTEGER &&
+		outputBuffer->Argument->DataLength < 1) {
+		status = STATUS_ACPI_INVALID_ARGUMENT;
+		goto Exit;
+	}
+
+	if (property) {
+		*property = outputBuffer->Argument->Data[0] & 0xF;
+	}
+
+Exit:
+	if (inputBuffer) {
+		ExFreePoolWithTag(inputBuffer, GMAX_POOL_TAG);
+	}
+	if (outputMemory != WDF_NO_HANDLE) {
+		WdfObjectDelete(outputMemory);
+	}
+	return status;
+}
+
 NTSTATUS
 StartCodec(
 	PGMAX_CONTEXT pDevice
@@ -627,6 +718,8 @@ StartCodec(
 
 	UINT8 data = 0;
 	gmax_reg_read(pDevice, pDevice->chipModel == 98927 ? MAX98927_R01FF_REV_ID : MAX98373_R21FF_REV_ID, &data);
+
+	BOOLEAN useDefaults = FALSE;
 
 	if (pDevice->chipModel == 98927) { //max98927
 		for (int i = 0; i < sizeof(max98927_initregs) / sizeof(struct initreg); i++) {
@@ -650,12 +743,35 @@ StartCodec(
 			return status;
 		}
 
-		UINT16 interleave_mode = 0; //was 1
-		UINT16 vmon_slot_no = 4;
-		UINT16 imon_slot_no = 5;
-		if (pDevice->UID == 1) {
-			vmon_slot_no = 6;
-			imon_slot_no = 7;
+		UINT16 interleave_mode = 0;
+		UINT16 vmon_slot_no = 0;
+		UINT16 imon_slot_no = 0;
+
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "interleave_mode", &interleave_mode))) {
+			DbgPrint("Warning: unable to get vmon-slot-no. Using defaults.\n");
+			useDefaults = TRUE;
+		}
+		interleave_mode = interleave_mode & 1;
+
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "vmon-slot-no", &vmon_slot_no))) {
+			DbgPrint("Warning: unable to get vmon-slot-no. Using defaults.\n");
+			useDefaults = TRUE;
+		}
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "imon-slot-no", &vmon_slot_no))) {
+			DbgPrint("Warning: unable to get vmon-slot-no. Using defaults.\n");
+			useDefaults = TRUE;
+		}
+
+		if (useDefaults) {
+			interleave_mode = 0;
+			if (pDevice->UID == 0) {
+				vmon_slot_no = 4;
+				imon_slot_no = 5;
+			}
+			else {
+				vmon_slot_no = 6;
+				imon_slot_no = 7;
+			}
 		}
 
 		UINT16 temp = (1 << vmon_slot_no) | (1 << imon_slot_no);
@@ -729,15 +845,41 @@ StartCodec(
 			return status;
 		}
 
-		UINT16 interleave_mode = 1; //was 1
-		UINT16 vmon_slot_no = 4;
-		UINT16 imon_slot_no = 5;
-		if (pDevice->UID == 1) {
-			vmon_slot_no = 6;
-			imon_slot_no = 7;
+		UINT16 interleave_mode = 1;
+		UINT16 vmon_slot_no = 0;
+		UINT16 imon_slot_no = 0;
+
+		UINT16 spkfb_slot_no = 0;
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,spkfb-slot-no", &vmon_slot_no))) {
+			spkfb_slot_no = 2;
 		}
 
-		UINT16 spkfb_slot_no = 2;
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,vmon-slot-no", &vmon_slot_no))) {
+			DbgPrint("Warning: unable to get maxim,vmon-slot-no. Using defaults.\n");
+			useDefaults = TRUE;
+		}
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,imon-slot-no", &vmon_slot_no))) {
+			DbgPrint("Warning: unable to get maxim,vmon-slot-no. Using defaults.\n");
+			useDefaults = TRUE;
+		}
+
+		if (useDefaults) {
+			if (pDevice->UID == 0) {
+				vmon_slot_no = 4;
+				imon_slot_no = 5;
+			}
+			else {
+				vmon_slot_no = 6;
+				imon_slot_no = 7;
+			}
+		} else {
+			if (NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,interleave_mode", &interleave_mode))) {
+				interleave_mode = 1;
+			}
+			else {
+				interleave_mode = 0;
+			}
+		}
 
 		UINT16 temp = ~((1 << vmon_slot_no) | (1 << imon_slot_no));
 		status = gmax_reg_write(pDevice, MAX98373_R2020_PCM_TX_HIZ_EN_1, temp);

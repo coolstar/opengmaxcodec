@@ -850,7 +850,7 @@ StartCodec(
 		UINT16 imon_slot_no = 0;
 
 		UINT16 spkfb_slot_no = 0;
-		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,spkfb-slot-no", &vmon_slot_no))) {
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,spkfb-slot-no", &spkfb_slot_no))) {
 			spkfb_slot_no = 2;
 		}
 

@@ -858,7 +858,7 @@ StartCodec(
 			DbgPrint("Warning: unable to get maxim,vmon-slot-no. Using defaults.\n");
 			useDefaults = TRUE;
 		}
-		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,imon-slot-no", &vmon_slot_no))) {
+		if (!NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,imon-slot-no", &imon_slot_no))) {
 			DbgPrint("Warning: unable to get maxim,vmon-slot-no. Using defaults.\n");
 			useDefaults = TRUE;
 		}

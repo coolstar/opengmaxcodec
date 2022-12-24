@@ -874,10 +874,10 @@ StartCodec(
 			}
 		} else {
 			if (NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,interleave_mode", &interleave_mode))) {
-				interleave_mode = 1;
+				interleave_mode = 0;
 			}
 			else {
-				interleave_mode = 0;
+				interleave_mode = 1;
 			}
 		}
 

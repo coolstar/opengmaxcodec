@@ -845,7 +845,7 @@ StartCodec(
 			return status;
 		}
 
-		UINT16 interleave_mode = 1;
+		UINT16 interleave_mode = 0;
 		UINT16 vmon_slot_no = 0;
 		UINT16 imon_slot_no = 0;
 
@@ -874,11 +874,30 @@ StartCodec(
 			}
 		} else {
 			if (NT_SUCCESS(GetIntegerProperty(pDevice->FxDevice, "maxim,interleave_mode", &interleave_mode))) {
-				interleave_mode = 0;
-			}
-			else {
 				interleave_mode = 1;
 			}
+			else {
+				interleave_mode = 0;
+			}
+		}
+
+		UINT16 fmt = MAX98373_PCM_MODE_CFG_CHANSZ_16;
+		UINT16 clkRatio = 0x6;
+
+		if (vmon_slot_no < 4) {
+			if ((vmon_slot_no % 2) == 0) {
+				fmt = MAX98373_PCM_MODE_CFG_CHANSZ_32;
+				clkRatio = 0x8;
+			}
+			else {
+				fmt = MAX98373_PCM_MODE_CFG_CHANSZ_24;
+				clkRatio = 0x7;
+			}
+		}
+
+		status = gmax_reg_write(pDevice, MAX98373_R2026_PCM_CLOCK_RATIO, clkRatio);
+		if (!NT_SUCCESS(status)) {
+			return status;
 		}
 
 		UINT16 temp = ~((1 << vmon_slot_no) | (1 << imon_slot_no));
@@ -888,16 +907,6 @@ StartCodec(
 		}
 
 		status = gmax_reg_write(pDevice, MAX98373_R2021_PCM_TX_HIZ_EN_2, (temp >> 8) | 0xff00);
-		if (!NT_SUCCESS(status)) {
-			return status;
-		}
-
-		status = gmax_reg_write(pDevice, MAX98373_R2030_ICC_TX_HIZ_EN_1, temp);
-		if (!NT_SUCCESS(status)) {
-			return status;
-		}
-
-		status = gmax_reg_write(pDevice, MAX98373_R2031_ICC_TX_HIZ_EN_2, (temp >> 8) | 0xff00);
 		if (!NT_SUCCESS(status)) {
 			return status;
 		}
@@ -912,7 +921,17 @@ StartCodec(
 			return status;
 		}
 
-		status = gmax_reg_write(pDevice, MAX98373_R2024_PCM_DATA_FMT_CFG, interleave_mode != 0 ? 0x5C : 0);
+		status = gmax_reg_write(pDevice, MAX98373_R2024_PCM_DATA_FMT_CFG, MAX98373_PCM_FORMAT_TDM_MODE0 << MAX98373_PCM_MODE_CFG_FORMAT_SHIFT);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_update(pDevice, MAX98373_R2024_PCM_DATA_FMT_CFG, MAX98373_PCM_MODE_CFG_CHANSZ_MASK, fmt);
+		if (!NT_SUCCESS(status)) {
+			return status;
+		}
+
+		status = gmax_reg_update(pDevice, MAX98373_R2024_PCM_DATA_FMT_CFG, MAX98373_PCM_TX_CH_INTERLEAVE_MASK, interleave_mode ? MAX98373_PCM_TX_CH_INTERLEAVE_MASK : 0);
 		if (!NT_SUCCESS(status)) {
 			return status;
 		}

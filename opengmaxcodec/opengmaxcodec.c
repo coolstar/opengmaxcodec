@@ -922,7 +922,7 @@ StartCodec(
 			return status;
 		}
 
-		status = gmax_reg_write(pDevice, MAX98373_R2029_PCM_TO_SPK_MONO_MIX_1, pDevice->UID == 0 ? 0x40 : 0);
+		status = gmax_reg_write(pDevice, MAX98373_R2029_PCM_TO_SPK_MONO_MIX_1, pDevice->UID == 1 ? 0x40 : 0);
 		if (!NT_SUCCESS(status)) {
 			return status;
 		}

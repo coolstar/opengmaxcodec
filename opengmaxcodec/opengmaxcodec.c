@@ -44,6 +44,49 @@ DriverEntry(
 	return status;
 }
 
+typedef enum platform {
+	PlatformNone,
+	PlatformRyzen,
+	PlatformAmberLake,
+	PlatformTigerLake
+} Platform;
+
+static Platform GetPlatform() {
+	int cpuinfo[4];
+	__cpuidex(cpuinfo, 0, 0);
+
+	int temp = cpuinfo[2];
+	cpuinfo[2] = cpuinfo[3];
+	cpuinfo[3] = temp;
+
+	char vendorName[13];
+	RtlZeroMemory(vendorName, 13);
+	memcpy(vendorName, &cpuinfo[1], 12);
+
+	__cpuidex(cpuinfo, 1, 0);
+
+	UINT16 family = (cpuinfo[0] >> 8) & 0xF;
+	UINT8 model = (cpuinfo[0] >> 4) & 0xF;
+	UINT8 stepping = cpuinfo[0] & 0xF;
+	if (family == 0xF || family == 0x6) {
+		model += (((cpuinfo[0] >> 16) & 0xF) << 4);
+	}
+	if (family == 0xF) {
+		family += (cpuinfo[0] >> 20) & 0xFF;
+	}
+
+	if (strcmp(vendorName, "AuthenticAMD") == 0) {
+		return PlatformRyzen; //family 23 for Picasso / Dali
+	}
+	else if (strcmp(vendorName, "GenuineIntel") == 0) {
+		if (model == 142)
+			return PlatformAmberLake;
+		else
+			return PlatformTigerLake; //should be 140
+	}
+	return PlatformNone;
+}
+
 NTSTATUS gmax_reg_read(
 	_In_ PGMAX_CONTEXT pDevice,
 	uint16_t reg,
@@ -721,6 +764,10 @@ StartCodec(
 
 	BOOLEAN useDefaults = FALSE;
 
+	INT32 rightSpeaker = 1;
+	if (GetPlatform() == PlatformAmberLake)
+		rightSpeaker = 0;
+
 	if (pDevice->chipModel == 98927) { //max98927
 		for (int i = 0; i < sizeof(max98927_initregs) / sizeof(struct initreg); i++) {
 			struct initreg regval = max98927_initregs[i];
@@ -812,7 +859,7 @@ StartCodec(
 			return status;
 		}
 
-		status = gmax_reg_write(pDevice, MAX98927_R0025_PCM_TO_SPK_MONOMIX_A, pDevice->UID == 0 ? 0x40 : 0);
+		status = gmax_reg_write(pDevice, MAX98927_R0025_PCM_TO_SPK_MONOMIX_A, pDevice->UID == rightSpeaker ? 0x40 : 0);
 		if (!NT_SUCCESS(status)) {
 			return status;
 		}
@@ -941,7 +988,7 @@ StartCodec(
 			return status;
 		}
 
-		status = gmax_reg_write(pDevice, MAX98373_R2029_PCM_TO_SPK_MONO_MIX_1, pDevice->UID == 1 ? 0x40 : 0);
+		status = gmax_reg_write(pDevice, MAX98373_R2029_PCM_TO_SPK_MONO_MIX_1, pDevice->UID == rightSpeaker ? 0x40 : 0);
 		if (!NT_SUCCESS(status)) {
 			return status;
 		}

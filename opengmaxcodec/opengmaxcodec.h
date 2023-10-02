@@ -35,43 +35,6 @@
 #define true 1
 #define false 0
 
-#pragma pack(push,1)
-typedef struct _IntcSSTArg
-{
-	int32_t chipModel;
-	int32_t sstQuery;
-	int32_t caller;
-	int32_t querySize;
-
-#ifdef __GNUC__
-	char EndOfHeader[0];
-#endif
-
-	uint8_t deviceInD0;
-#ifdef __GNUC__
-	char EndOfPowerCfg[0];
-#endif
-
-	int32_t dword11;
-	GUID guid;
-
-#ifdef __GNUC__
-	char EndOfGUID[0];
-#endif
-	uint8_t byte25;
-	int32_t dword26;
-	int32_t dword2A;
-	int32_t dword2E;
-	int32_t dword32;
-	int32_t dword36;
-	int32_t dword3A;
-	int32_t dword3E;
-	uint8_t byte42;
-	uint8_t byte43;
-	char padding[90]; //idk what this is for
-}  IntcSSTArg, * PIntcSSTArg;
-#pragma pack(pop)
-
 typedef enum {
 	CSAudioEndpointTypeDSP,
 	CSAudioEndpointTypeSpeaker,
@@ -119,18 +82,11 @@ typedef struct _GMAX_CONTEXT
 	UINT32 chipModel;
 
 	BOOLEAN DevicePoweredOn;
-	INT8 IntcSSTStatus;
-
-	WDFWORKITEM IntcSSTWorkItem;
-	PCALLBACK_OBJECT IntcSSTHwMultiCodecCallback;
-	PVOID IntcSSTCallbackObj;
 
 	PCALLBACK_OBJECT CSAudioAPICallback;
 	PVOID CSAudioAPICallbackObj;
 
 	BOOL CSAudioManaged;
-
-	IntcSSTArg sstArgTemp;
 
 } GMAX_CONTEXT, *PGMAX_CONTEXT;
 

@@ -47,6 +47,10 @@ opengmaxcodec.sys  = 1,,
 [OpenGmaxCodec_Device.NT]
 CopyFiles=Drivers_Dir
 
+[OpenGmaxCodec_Device.NT.HW]
+Include=pci.inf
+Needs=PciD3ColdSupported.HW
+
 [Drivers_Dir]
 opengmaxcodec.sys
 

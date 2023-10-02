@@ -87,6 +87,7 @@ typedef struct _GMAX_CONTEXT
 	PVOID CSAudioAPICallbackObj;
 
 	BOOL CSAudioManaged;
+	BOOLEAN CSAudioRequestsOn;
 
 } GMAX_CONTEXT, *PGMAX_CONTEXT;
 

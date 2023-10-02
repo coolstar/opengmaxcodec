@@ -783,10 +783,16 @@ CsAudioCallbackFunction(
 	}
 
 	if (localArg.endpointRequest == CSAudioEndpointStop) {
-		StopCodec(pDevice);
+		if (pDevice->CSAudioRequestsOn) {
+			WdfDeviceResumeIdle(pDevice->FxDevice);
+			pDevice->CSAudioRequestsOn = FALSE;
+		}
 	}
 	if (localArg.endpointRequest == CSAudioEndpointStart) {
-		StartCodec(pDevice);
+		if (!pDevice->CSAudioRequestsOn) {
+			WdfDeviceStopIdle(pDevice->FxDevice, TRUE);
+			pDevice->CSAudioRequestsOn = TRUE;
+		}
 	}
 }
 
@@ -1143,7 +1149,7 @@ GmaxEvtDeviceAdd(
 
 	WDF_IO_QUEUE_CONFIG_INIT(&queueConfig, WdfIoQueueDispatchManual);
 
-	queueConfig.PowerManaged = WdfFalse;
+	queueConfig.PowerManaged = WdfTrue;
 
 	status = WdfIoQueueCreate(device,
 		&queueConfig,
@@ -1158,6 +1164,15 @@ GmaxEvtDeviceAdd(
 
 		return status;
 	}
+
+	WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS IdleSettings;
+
+	WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS_INIT(&IdleSettings, IdleCannotWakeFromS0);
+	IdleSettings.IdleTimeoutType = SystemManagedIdleTimeoutWithHint;
+	IdleSettings.IdleTimeout = 1000;
+	IdleSettings.Enabled = WdfTrue;
+
+	WdfDeviceAssignS0IdleSettings(devContext->FxDevice, &IdleSettings);
 
 	return status;
 }

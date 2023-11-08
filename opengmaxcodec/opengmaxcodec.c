@@ -769,8 +769,6 @@ CsAudioCallbackFunction(
 		return;
 	}
 
-	pDevice->CSAudioManaged = TRUE;
-
 	CsAudioArg localArg;
 	RtlZeroMemory(&localArg, sizeof(CsAudioArg));
 	RtlCopyMemory(&localArg, arg, min(arg->argSz, sizeof(CsAudioArg)));
@@ -1016,12 +1014,7 @@ Status
 	UNREFERENCED_PARAMETER(FxPreviousState);
 
 	PGMAX_CONTEXT pDevice = GetDeviceContext(FxDevice);
-	NTSTATUS status = STATUS_SUCCESS;
-
-	if (!pDevice->CSAudioManaged) {
-		status = StartCodec(pDevice);
-	}
-
+	NTSTATUS status = StartCodec(pDevice);
 	return status;
 }
 
@@ -1145,7 +1138,6 @@ GmaxEvtDeviceAdd(
 	devContext = GetDeviceContext(device);
 
 	devContext->FxDevice = device;
-	devContext->CSAudioManaged = FALSE;
 
 	WDF_IO_QUEUE_CONFIG_INIT(&queueConfig, WdfIoQueueDispatchManual);
 
